@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Open WebUI is a self-hosted AI chat interface. This repository is my **private fork**, kept closely tracking upstream.
+Open WebUI is a self-hosted AI chat interface. This repository is my **private fork**.
 
 NOTE: This document is still work-in-progress, consequently very much incomplete.
 
@@ -19,14 +19,13 @@ NOTE: This document is still work-in-progress, consequently very much incomplete
 | Install frontend deps | `pnpm install` |
 | Dev server | `pnpm dev` |
 | Production build | `pnpm build` |
-| Type check / lint frontend | `pnpm check` / `pnpm lint` |
 | Add Python dependency | `uv add <pkg>` |
+
+Note: Don't bother with `pnpm check` or `pnpm list`. They report ~8k pre-existing errors from the wizard's upstream.
 
 ## Production deployment
 
-On this machine, the production instance is a user-level systemd service
-running this checkout directly (uvicorn serves both API and the built SPA;
-`backend/start.sh` is the upstream container entry point and is not used):
+On this machine, the production instance is a user-level systemd service running this checkout directly (uvicorn serves both API and the built SPA; `backend/start.sh` is the upstream container entry point and is not used):
 
 - Unit: `~/.config/systemd/user/open-webui.service` — restart it after
   `pnpm build` / `uv sync` to pick up changes
@@ -36,5 +35,4 @@ running this checkout directly (uvicorn serves both API and the built SPA;
 
 ## Package manager: pnpm, not npm
 
-This fork uses pnpm while upstream uses npm. The only intentional divergence
-from upstream is two added files: `pnpm-lock.yaml` and `pnpm-workspace.yaml`.
+This fork uses pnpm while upstream uses npm. The only intentional divergence from upstream is two added files: `pnpm-lock.yaml` and `pnpm-workspace.yaml`. The lock file was automatically generated from `package-lock.json` by `pnpm`.

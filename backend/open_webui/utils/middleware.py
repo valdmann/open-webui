@@ -3938,12 +3938,14 @@ async def background_tasks_handler(ctx):
 
             if is_saved_chat_id(metadata.get('chat_id')):  # Only update titles and tags for saved chats
                 if TASKS.TITLE_GENERATION in tasks:
+                    title_locked = await Chats.is_chat_title_locked_by_id(metadata['chat_id'])
+
                     user_message = get_last_user_message(messages)
                     if user_message and len(user_message) > 100:
                         user_message = user_message[:100] + '...'
 
                     title = None
-                    if tasks[TASKS.TITLE_GENERATION]:
+                    if tasks[TASKS.TITLE_GENERATION] and not title_locked:
                         res = await generate_title(
                             request,
                             {
@@ -3987,7 +3989,12 @@ async def background_tasks_handler(ctx):
                                 }
                             )
 
-                    if title == None and len(messages) == 2 and (not messages_map or len(messages_map) <= 2):
+                    if (
+                        not title_locked
+                        and title == None
+                        and len(messages) == 2
+                        and (not messages_map or len(messages_map) <= 2)
+                    ):
                         title = messages[0].get('content', user_message)
 
                         await Chats.update_chat_title_by_id(metadata['chat_id'], title)
@@ -6628,6 +6635,37 @@ async def streaming_chat_response_handler(response, ctx):
                                 'output': cancelled_output,
                             },
                         )
+
+                        # The response was stopped before end-of-stream title generation could
+                        # run — fall back to the first user message so the chat doesn't stay
+                        # "New Chat". update_chat_title_by_id respects the manual-rename lock.
+                        try:
+                            current_title = await Chats.get_chat_title_by_id(metadata['chat_id'])
+                            if current_title == 'New Chat':
+                                messages_map = await Chats.get_messages_map_by_chat_id(metadata['chat_id'])
+                                message_list = get_message_list(messages_map, metadata['message_id'])
+                                if message_list:
+                                    title_candidate = message_list[0].get('content', '')
+                                    if isinstance(title_candidate, list):
+                                        for item in title_candidate:
+                                            if item.get('type') == 'text':
+                                                title_candidate = item.get('text', '')
+                                                break
+                                    if isinstance(title_candidate, str) and title_candidate.strip():
+                                        if len(title_candidate) > 100:
+                                            title_candidate = title_candidate[:100] + '...'
+                                        await Chats.update_chat_title_by_id(metadata['chat_id'], title_candidate)
+                                        await event_emitter(
+                                            {
+                                                'type': 'chat:title',
+                                                'data': title_candidate,
+                                            }
+                                        )
+                        except Exception as e:
+                            log.debug(
+                                'Error setting fallback title for cancelled chat %s: %s', metadata.get('chat_id'), e
+                            )
+
                     await clear_response_stream(request.app.state.redis, response_stream_task_id)
 
                 try:

@@ -854,6 +854,11 @@ class ChatTable:
                 )
                 if chat_item is None:
                     return None
+
+                if (chat_item.meta or {}).get('titleLocked'):
+                    # User renamed this chat manually; never overwrite their title.
+                    return None
+
                 clean_title = self._clean_null_bytes(title)
                 chat_item.title = clean_title
                 chat_item.chat = {**(chat_item.chat or {}), 'title': clean_title}
@@ -895,6 +900,32 @@ class ChatTable:
             if row is None:
                 return None
             return row[0] or 'New Chat'
+
+    async def is_chat_title_locked_by_id(self, id: str) -> bool:
+        async with get_async_db_context() as session:
+            result = await session.execute(select(Chat.meta).filter_by(id=id))
+            row = result.first()
+            if row is None:
+                return False
+            return bool((row[0] or {}).get('titleLocked'))
+
+    async def set_chat_title_locked_by_id(
+        self,
+        id: str,
+        locked: bool = True,
+        db: AsyncSession | None = None,
+    ) -> None:
+        async with get_async_db_context(db) as session:
+            row = (await session.execute(select(Chat.meta).filter_by(id=id))).one_or_none()
+            if row is None:
+                return
+
+            meta = row[0] or {}
+            if bool(meta.get('titleLocked')) == locked:
+                return
+
+            await session.execute(update(Chat).filter_by(id=id).values(meta={**meta, 'titleLocked': locked}))
+            await session.commit()
 
     @staticmethod
     def get_unresolved_parent_ids(messages_map: dict) -> set[str]:

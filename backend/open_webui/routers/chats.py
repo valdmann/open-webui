@@ -1364,6 +1364,9 @@ async def update_chat_by_id(
     if chat:
         touch = 'history' in form_data.chat or 'messages' in form_data.chat
         chat = await Chats.update_chat_by_id(id, form_data.chat, db=db, touch=touch)
+        if chat and 'title' in form_data.chat:
+            # Manual rename: lock the title so auto title generation never overwrites it.
+            await Chats.set_chat_title_locked_by_id(id, db=db)
         if form_data.variables is not None:
             chat = (
                 await Chats.update_chat_variables_by_id(

@@ -241,7 +241,6 @@ from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.json_response import apply_orjson_http_json
 from open_webui.utils.logger import start_logger
 from open_webui.utils.middleware import (
-    background_tasks_handler,
     build_chat_response_context,
     drain_approved_tool_calls,
     process_chat_payload,
@@ -1299,10 +1298,6 @@ async def chat_completion(
         if is_new_chat:
             metadata['chat_id'] = str(uuid4())
 
-        initial_title_generation = None
-        if is_new_chat and tasks and TASKS.TITLE_GENERATION in tasks:
-            initial_title_generation = tasks.pop(TASKS.TITLE_GENERATION)
-
         if metadata.get('chat_id') and user:
             chat_id = metadata['chat_id']
 
@@ -1468,28 +1463,6 @@ async def chat_completion(
                             log.debug('Error inserting chat files: %s', e)
                             pass
 
-                    if initial_title_generation is not None and all_assistant_ids:
-                        title_metadata = {
-                            **metadata,
-                            'message_id': all_assistant_ids[0],
-                        }
-                        event_emitter = await get_event_emitter(title_metadata, update_db=False)
-                        title_ctx = {
-                            'request': request,
-                            'form_data': form_data,
-                            'user': user,
-                            'metadata': title_metadata,
-                            'tasks': {TASKS.TITLE_GENERATION: initial_title_generation},
-                            'event_emitter': event_emitter,
-                        }
-
-                        async def run_initial_title_generation():
-                            try:
-                                await background_tasks_handler(title_ctx)
-                            except Exception:
-                                log.exception('Error generating initial chat title')
-
-                        asyncio.create_task(run_initial_title_generation())
                 else:
                     # Existing chat — verify ownership
                     if not await Chats.is_chat_owner(chat_id, user.id) and user.role != 'admin':

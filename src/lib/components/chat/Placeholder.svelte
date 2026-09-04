@@ -62,6 +62,9 @@
 	export let webSearchEnabled = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: Function = () => {};
+
+	export let reasoningEffort: string | null = null;
+	export let onReasoningEffortChange: Function = () => {};
 	export let oauthRedirectHandler: Function = () => {};
 
 	export let onUpload: Function = (e) => {};
@@ -260,6 +263,8 @@
 						{oauthRedirectHandler}
 						{toolApprovalMode}
 						{onToolApprovalModeChange}
+						{reasoningEffort}
+						{onReasoningEffortChange}
 						{stopResponse}
 						{createMessagePair}
 						placeholder={$i18n.t('How can I help you today?')}

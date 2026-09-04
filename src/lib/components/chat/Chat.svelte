@@ -434,6 +434,16 @@
 			? 'ask'
 			: 'full';
 
+	const handleReasoningEffortChange = (effort: string | null) => {
+		const rest: Record<string, any> = { ...params };
+		if (effort) {
+			rest.reasoning_effort = effort;
+		} else {
+			delete rest.reasoning_effort;
+		}
+		params = rest;
+	};
+
 	const handleToolApprovalModeChange = async (mode: string) => {
 		const tool_approval_mode = mode === 'ask' ? 'ask' : 'full';
 		params = {
@@ -4465,6 +4475,8 @@
 										forkHandler={handleForkChat}
 										{toolApprovalMode}
 										onToolApprovalModeChange={handleToolApprovalModeChange}
+										reasoningEffort={params?.reasoning_effort ?? null}
+										onReasoningEffortChange={handleReasoningEffortChange}
 										{generating}
 										{stopResponse}
 										{createMessagePair}
@@ -4557,6 +4569,8 @@
 										forkHandler={handleForkChat}
 										{toolApprovalMode}
 										onToolApprovalModeChange={handleToolApprovalModeChange}
+										reasoningEffort={params?.reasoning_effort ?? null}
+										onReasoningEffortChange={handleReasoningEffortChange}
 										{generating}
 										{stopResponse}
 										{createMessagePair}
@@ -4608,6 +4622,8 @@
 									bind:dragged
 									{toolApprovalMode}
 									onToolApprovalModeChange={handleToolApprovalModeChange}
+									reasoningEffort={params?.reasoning_effort ?? null}
+									onReasoningEffortChange={handleReasoningEffortChange}
 									{pendingOAuthTools}
 									{oauthRedirectHandler}
 									{stopResponse}

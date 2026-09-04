@@ -1187,6 +1187,9 @@ async def chat_completion(
         stream_delta_chunk_size = form_data.get('params', {}).get('stream_delta_chunk_size')
         reasoning_tags = form_data.get('params', {}).get('reasoning_tags')
         compact_token_threshold = form_data.get('params', {}).get('compact_token_threshold')
+        # Pop from params — it's UI-only and must never flatten into the
+        # upstream request body via apply_params_to_form_data.
+        enable_file_context = bool((form_data.get('params', {}) or {}).pop('enable_file_context', False))
 
         # Model Params
         if model_info_params.get('stream_response') is not None:
@@ -1292,6 +1295,7 @@ async def chat_completion(
                     or 'native'
                 ),
                 'tool_approval_mode': tool_approval_mode,
+                'enable_file_context': enable_file_context,
             },
         }
 

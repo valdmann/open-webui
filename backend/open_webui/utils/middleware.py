@@ -2806,10 +2806,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             if note_files:
                 files = [*(files or []), *note_files]
 
+    _caps = (model.get('info', {}).get('meta', {}).get('capabilities') or {})
     use_builtin_tools = is_note_chat or (
         bool(metadata.get('session_id'))
         and metadata.get('params', {}).get('function_calling') != 'legacy'
-        and (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get('builtin_tools', True)
+        and _caps.get('builtin_tools', True)
     )
 
     if skill_ids or use_builtin_tools:
@@ -3096,11 +3097,19 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         # Inject builtin tools for native function calling based on enabled features and model capability.
         # Only inject when the request originates from the UI (identified by session_id).
         # API callers don't expect hidden tools; they can explicitly request tools via tool_ids.
-        if use_builtin_tools:
-            # Add file context to user messages
+        # File context tags are opt-in per chat (enable_file_context) and
+        # deliberately independent of builtin tools — they only need a UI
+        # request and native function calling.
+        use_file_context = (
+            bool(metadata.get('session_id'))
+            and metadata.get('params', {}).get('function_calling') != 'legacy'
+            and bool(metadata.get('params', {}).get('enable_file_context'))
+        )
+        if use_file_context:
             chat_id = metadata.get('chat_id')
             form_data['messages'] = await add_file_context(form_data.get('messages', []), chat_id, user)
 
+        if use_builtin_tools:
             if (model.get('info', {}).get('meta', {}).get('builtinTools') or {}).get('knowledge', True):
                 from html import escape
 

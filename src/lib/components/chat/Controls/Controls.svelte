@@ -8,6 +8,8 @@
 	import Valves from '$lib/components/chat/Controls/Valves.svelte';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import Collapsible from '$lib/components/common/Collapsible.svelte';
+	import Switch from '$lib/components/common/Switch.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	import { user, settings } from '$lib/stores';
 	export let models = [];
@@ -28,6 +30,19 @@
 	let showValves = getOpen('valves', false);
 	let showSystemPrompt = getOpen('systemPrompt');
 	let showAdvancedParams = getOpen('advancedParams');
+
+	// Accessor for the Switch so it renders off when the param is unset
+	// (binding undefined directly would render the default-on state).
+	// A setter is used instead of reactive statements to avoid a
+	// enableFileContext <-> params dependency cycle.
+	const fileContextBinding = {
+		get value() {
+			return params.enable_file_context ?? false;
+		},
+		set value(v) {
+			params = { ...params, enable_file_context: v };
+		}
+	};
 
 	const compactSectionButtonClass =
 		'w-full py-1 text-xs font-normal text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition cursor-pointer select-none';
@@ -90,6 +105,20 @@
 					</div>
 				</Collapsible>
 			{/if}
+
+			<div class="flex items-center justify-between py-1 px-0.5">
+				<Tooltip
+					content={$i18n.t(
+						'Include attached file metadata tags in user messages so tools can reference them'
+					)}
+				>
+					<div class="text-xs text-gray-500">{$i18n.t('Send File Metadata')}</div>
+				</Tooltip>
+				<Switch
+					bind:state={fileContextBinding.value}
+					ariaLabel={$i18n.t('Send File Metadata')}
+				/>
+			</div>
 
 			{#if $user?.role === 'admin' || ($user?.permissions.chat?.valves ?? true)}
 				<Collapsible

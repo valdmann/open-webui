@@ -259,10 +259,14 @@
 	$: sanitizedSearchValue = searchValue.trim();
 	$: searchTokens = sanitizedSearchValue.split(/\s+/).filter(Boolean);
 
+	const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+	const compareItems = (a, b) => collator.compare(a.label ?? a.value, b.label ?? b.value);
+
 	$: filteredItems = items
 		.filter(matchesFilters)
 		.filter((item) => !searchTokens.length || matchTokens(getHaystack(item), searchTokens))
-		.filter((item) => includeHidden || !(item.model?.info?.meta?.hidden ?? false));
+		.filter((item) => includeHidden || !(item.model?.info?.meta?.hidden ?? false))
+		.sort(compareItems);
 	$: downloadTargets =
 		!selectionOnly && sanitizedSearchValue && $user?.role === 'admin'
 			? [

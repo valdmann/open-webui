@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { marked } from 'marked';
-	import Fuse from 'fuse.js';
 	import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom';
 
 	import dayjs from '$lib/dayjs';
@@ -224,92 +223,46 @@
 	const getProviderPoolKey = (connection, model: string) =>
 		`${connection.provider}:${connection.idx}:${model}`;
 
-	const fuse = new Fuse(
-		items.map((item) => {
-			const _item = {
-				...item,
-				modelName: resolveLocalizedModelName(item.model, $i18n.language),
-				tags: (item.model?.tags ?? []).map((tag) => tag.name).join(' '),
-				desc: resolveLocalizedModelDescription(item.model, $i18n.language)
-			};
-			return _item;
-		}),
-		{
-			keys: ['value', 'tags', 'modelName'],
-			threshold: 0.4
-		}
-	);
+	// Ordered token subsequence match: 'ge 26 he' behaves like /.*ge.*26.*he.*/i
+	// against the model id, name, and tags.
+	const getHaystack = (item) =>
+		`${item.value ?? ''} ${resolveLocalizedModelName(item.model, $i18n.language) ?? ''} ${(item.model?.tags ?? [])
+			.map((tag) => tag.name)
+			.join(' ')}`
+			.toLowerCase();
 
-	const updateFuse = () => {
-		if (fuse) {
-			fuse.setCollection(
-				items.map((item) => {
-					const _item = {
-						...item,
-						modelName: resolveLocalizedModelName(item.model, $i18n.language),
-						tags: (item.model?.tags ?? []).map((tag) => tag.name).join(' '),
-						desc: resolveLocalizedModelDescription(item.model, $i18n.language)
-					};
-					return _item;
-				})
-			);
+	const matchTokens = (haystack, tokens) => {
+		let pos = 0;
+		for (const token of tokens) {
+			pos = haystack.indexOf(token, pos);
+			if (pos === -1) return false;
+			pos += token.length;
 		}
+		return true;
 	};
 
-	$: if (items) {
-		updateFuse();
-	}
-
-	$: filteredItems = (
-		searchValue
-			? fuse
-					.search(searchValue)
-					.map((e) => {
-						return e.item;
-					})
-					.filter((item) => {
-						if (selectedTag === '') {
-							return true;
-						}
-
-						return (item.model?.tags ?? [])
-							.map((tag) => tag.name.toLowerCase())
-							.includes(selectedTag.toLowerCase());
-					})
-					.filter((item) => {
-						if (selectedConnectionType === '') {
-							return true;
-						} else if (selectedConnectionType === 'local') {
-							return item.model?.connection_type === 'local';
-						} else if (selectedConnectionType === 'external') {
-							return item.model?.connection_type === 'external';
-						} else if (selectedConnectionType === 'direct') {
-							return item.model?.direct;
-						}
-					})
-			: items
-					.filter((item) => {
-						if (selectedTag === '') {
-							return true;
-						}
-						return (item.model?.tags ?? [])
-							.map((tag) => tag.name.toLowerCase())
-							.includes(selectedTag.toLowerCase());
-					})
-					.filter((item) => {
-						if (selectedConnectionType === '') {
-							return true;
-						} else if (selectedConnectionType === 'local') {
-							return item.model?.connection_type === 'local';
-						} else if (selectedConnectionType === 'external') {
-							return item.model?.connection_type === 'external';
-						} else if (selectedConnectionType === 'direct') {
-							return item.model?.direct;
-						}
-					})
-	).filter((item) => includeHidden || !(item.model?.info?.meta?.hidden ?? false));
+	const matchesFilters = (item) => {
+		if (
+			selectedTag !== '' &&
+			!(item.model?.tags ?? [])
+				.map((tag) => tag.name.toLowerCase())
+				.includes(selectedTag.toLowerCase())
+		) {
+			return false;
+		}
+		if (selectedConnectionType === 'local') return item.model?.connection_type === 'local';
+		if (selectedConnectionType === 'external') return item.model?.connection_type === 'external';
+		if (selectedConnectionType === 'direct') return !!item.model?.direct;
+		return true;
+	};
 
 	$: sanitizedSearchValue = searchValue.trim();
+	$: searchTokens = sanitizedSearchValue.split(/\s+/).filter(Boolean);
+
+	$: filteredItems = items
+		.filter(matchesFilters)
+		.filter((item) => !searchTokens.length || matchTokens(getHaystack(item), searchTokens))
+		.filter((item) => includeHidden || !(item.model?.info?.meta?.hidden ?? false));
 	$: downloadTargets =
 		!selectionOnly && sanitizedSearchValue && $user?.role === 'admin'
 			? [

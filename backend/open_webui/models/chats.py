@@ -58,17 +58,35 @@ def chat_search_terms(text: str) -> list[str]:
 
 def chat_search_message_content_match_sql(dialect_name: str, key: str) -> str:
     if dialect_name == 'sqlite':
+        # The normalized chat_message rows hold the same text as the embedded
+        # history at a fraction of the size, so search them first. Fall back to
+        # the JSON blob only for chats that have no rows yet (legacy imports).
         return f"""
         (
             EXISTS (
                 SELECT 1
-                FROM json_each(Chat.chat, '$.history.messages') AS history_message
-                WHERE LOWER(history_message.value->>'content') LIKE '%' || :{key} || '%'
+                FROM chat_message AS message
+                WHERE message.chat_id = Chat.id
+                AND LOWER(json_extract(message.content, '$')) LIKE '%' || :{key} || '%'
             )
-            OR EXISTS (
-                SELECT 1
-                FROM json_each(Chat.chat, '$.messages') AS legacy_message
-                WHERE LOWER(legacy_message.value->>'content') LIKE '%' || :{key} || '%'
+            OR (
+                NOT EXISTS (
+                    SELECT 1
+                    FROM chat_message AS synced
+                    WHERE synced.chat_id = Chat.id
+                )
+                AND (
+                    EXISTS (
+                        SELECT 1
+                        FROM json_each(Chat.chat, '$.history.messages') AS history_message
+                        WHERE LOWER(history_message.value->>'content') LIKE '%' || :{key} || '%'
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM json_each(Chat.chat, '$.messages') AS legacy_message
+                        WHERE LOWER(legacy_message.value->>'content') LIKE '%' || :{key} || '%'
+                    )
+                )
             )
         )
         """

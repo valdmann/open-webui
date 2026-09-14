@@ -1560,30 +1560,11 @@ async def search_chats(
             if end_timestamp and chat.updated_at > end_timestamp:
                 continue
 
-            # Find a matching message snippet
-            snippet = ''
-            messages = (getattr(chat, 'chat', None) or {}).get('history', {}).get('messages', {})
-            if not messages:
-                messages = (getattr(chat, 'chat', None) or {}).get('messages', {}) or {}
-            if isinstance(messages, list):
-                messages = {str(idx): message for idx, message in enumerate(messages)}
+            # Snippet is built from the normalized message rows by the search query
+            snippet = chat.snippet or ''
 
             lower_query = chat_search_content_query(query)
             needles = list(dict.fromkeys([lower_query, *chat_search_terms(lower_query)])) if lower_query else []
-
-            for needle in needles:
-                for msg_id, msg in messages.items():
-                    content = msg.get('content', '') if isinstance(msg, dict) else ''
-                    if isinstance(content, str) and needle in content.lower():
-                        idx = content.lower().find(needle)
-                        start = max(0, idx - 50)
-                        end = min(len(content), idx + len(needle) + 100)
-                        snippet = (
-                            ('...' if start > 0 else '') + content[start:end] + ('...' if end < len(content) else '')
-                        )
-                        break
-                if snippet:
-                    break
 
             title = chat.title or ''
             if not snippet and any(needle in title.lower() for needle in needles):

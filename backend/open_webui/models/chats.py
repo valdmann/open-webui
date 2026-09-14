@@ -56,18 +56,63 @@ def chat_search_terms(text: str) -> list[str]:
     return list(dict.fromkeys(re.findall(r'[a-z0-9]+', text.lower())))
 
 
+def chat_search_snippet_from_contents(contents: list, needles: list[str], max_length: int = 200) -> str | None:
+    for needle in needles:
+        for content in contents:
+            if not isinstance(content, str):
+                continue
+
+            index = content.lower().find(needle)
+            if index == -1:
+                continue
+
+            start = max(index - max_length // 2, 0)
+            end = min(start + max_length, len(content))
+            if index + len(needle) > end:
+                end = min(index + len(needle), len(content))
+                start = max(end - max_length, 0)
+
+            snippet = ' '.join(content[start:end].split())
+            return f'{"..." if start else ""}{snippet}{"..." if end < len(content) else ""}'
+
+    return None
+
+
+def chat_search_message_text_sql(dialect_name: str) -> str:
+    """SQL expression for the searchable text of a chat_message row."""
+    if dialect_name == 'sqlite':
+        return "LOWER(json_extract(chat_message.content, '$'))"
+    if dialect_name == 'postgresql':
+        return "LOWER(chat_message.content #>> '{}')"
+    raise NotImplementedError(f'Unsupported dialect: {dialect_name}')
+
+
+def chat_search_message_content_expr(dialect_name: str, key: str) -> str:
+    """SQL condition: a chat_message row's text contains the :key substring.
+
+    SQLite connections register a Python function as ``like``, so a LIKE scan
+    pays a callback and regex match per row. INSTR is native C and skips that.
+    """
+    if dialect_name == 'sqlite':
+        return f'INSTR({chat_search_message_text_sql(dialect_name)}, :{key}) > 0'
+    if dialect_name == 'postgresql':
+        return f"{chat_search_message_text_sql(dialect_name)} LIKE '%' || :{key} || '%'"
+    raise NotImplementedError(f'Unsupported dialect: {dialect_name}')
+
+
 def chat_search_message_content_match_sql(dialect_name: str, key: str) -> str:
     if dialect_name == 'sqlite':
         # The normalized chat_message rows hold the same text as the embedded
         # history at a fraction of the size, so search them first. Fall back to
         # the JSON blob only for chats that have no rows yet (legacy imports).
+        content_match = chat_search_message_content_expr(dialect_name, key)
         return f"""
         (
             EXISTS (
                 SELECT 1
-                FROM chat_message AS message
-                WHERE message.chat_id = Chat.id
-                AND LOWER(json_extract(message.content, '$')) LIKE '%' || :{key} || '%'
+                FROM chat_message
+                WHERE chat_message.chat_id = Chat.id
+                AND {content_match}
             )
             OR (
                 NOT EXISTS (
@@ -2009,6 +2054,46 @@ class ChatTable:
             return [ChatModel.model_validate(chat) for chat in result.scalars().all()]
 
     # search user conversations
+    async def _get_search_snippets(
+        self,
+        session: AsyncSession,
+        chat_ids: list[str],
+        needles: list[str],
+        dialect_name: str,
+    ) -> dict[str, str | None]:
+        """Build a message snippet per chat from the normalized message rows.
+
+        Keeps the search endpoint off the large embedded chat JSON.
+        """
+        if not chat_ids or not needles:
+            return {}
+
+        clauses = []
+        params = {}
+        for idx, needle in enumerate(needles):
+            key = f'snippet_needle_{idx}'
+            clauses.append(text(chat_search_message_content_expr(dialect_name, key)))
+            params[key] = needle
+
+        stmt = (
+            select(ChatMessage.chat_id, ChatMessage.content)
+            .where(ChatMessage.chat_id.in_(chat_ids))
+            .where(or_(*clauses))
+            .order_by(ChatMessage.chat_id.asc(), ChatMessage.created_at.asc())
+        )
+        stmt = stmt.params(**params)
+        rows = (await session.execute(stmt)).all()
+
+        contents_by_chat: dict[str, list[str]] = {}
+        for chat_id, message_content in rows:
+            if isinstance(message_content, str):
+                contents_by_chat.setdefault(chat_id, []).append(message_content)
+
+        return {
+            chat_id: chat_search_snippet_from_contents(contents, needles)
+            for chat_id, contents in contents_by_chat.items()
+        }
+
     async def get_chats_by_user_id_and_search_text(  # noqa: C901
         self,
         user_id: str,
@@ -2017,9 +2102,10 @@ class ChatTable:
         skip: int = 0,
         limit: int = 60,
         db: AsyncSession | None = None,
-    ) -> list[ChatModel]:
-        """
-        Filters chats based on a search query using Python, allowing pagination using skip and limit.
+    ) -> list[ChatTitleIdResponse]:
+        """Return lightweight chat rows matching a search query, with message snippets.
+
+        Filters chats based on a search query, allowing pagination using skip and limit.
         """
         search_text = sanitize_text_for_db(search_text).lower().strip()
 
@@ -2062,9 +2148,12 @@ class ChatTable:
 
         phrase_query = ' '.join(search_text_words).strip()
         search_terms = chat_search_terms(phrase_query)
+        needles = list(dict.fromkeys([phrase_query, *search_terms])) if phrase_query else []
 
         async with get_async_db_context(db) as session:
-            stmt = select(Chat).filter(Chat.user_id == user_id)
+            stmt = select(Chat.id, Chat.title, Chat.updated_at, Chat.created_at, Chat.last_read_at, Chat.archived).filter(
+                Chat.user_id == user_id
+            )
             stmt = stmt.where(Chat.meta['internal'].as_boolean().is_not(True))
 
             if is_archived is not None:
@@ -2192,12 +2281,24 @@ class ChatTable:
             # Perform pagination at the SQL level
             stmt = stmt.offset(skip).limit(limit)
             result = await session.execute(stmt)
-            all_chats = result.scalars().all()
+            rows = result.all()
 
-            log.info('The number of chats: %s', len(all_chats))
+            log.info('The number of chats: %s', len(rows))
 
-            # Validate and return chats
-            return [ChatModel.model_validate(chat) for chat in all_chats]
+            snippets = await self._get_search_snippets(session, [row.id for row in rows], needles, dialect_name)
+
+            return [
+                ChatTitleIdResponse(
+                    id=row.id,
+                    title=row.title,
+                    updated_at=row.updated_at,
+                    created_at=row.created_at,
+                    last_read_at=row.last_read_at,
+                    snippet=snippets.get(row.id),
+                    archived=row.archived,
+                )
+                for row in rows
+            ]
 
     async def get_chats_by_folder_id_and_user_id(
         self,

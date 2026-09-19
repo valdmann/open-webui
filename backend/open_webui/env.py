@@ -155,6 +155,9 @@ DEPLOYMENT_ID = os.getenv('DEPLOYMENT_ID', '')
 INSTANCE_ID = os.getenv('INSTANCE_ID', str(uuid4()))
 
 ENABLE_DB_MIGRATIONS = os.getenv('ENABLE_DB_MIGRATIONS', 'True').lower() == 'true'
+# FTS5 trigram index for chat search (see models/chats.py). Disabled
+# falls back to the legacy content scan.
+ENABLE_FTS_CHAT_SEARCH = os.getenv('ENABLE_FTS_CHAT_SEARCH', 'True').lower() == 'true'
 
 # Swap the JSON encoder/decoder used across the app (HTTP request bodies, JSONResponse
 # bodies, upstream provider responses, socket.io payloads) from the stdlib `json` module

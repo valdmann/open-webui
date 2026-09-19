@@ -9,7 +9,7 @@ import uuid
 from typing import Any, Literal
 
 # local imports
-from open_webui.env import ENABLE_ADMIN_CHAT_ACCESS
+from open_webui.env import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_FTS_CHAT_SEARCH
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.automations import AutomationRun
@@ -25,7 +25,10 @@ from sqlalchemy import (
     Column,
     ForeignKey,
     Index,
+    Integer,
+    MetaData,
     String,
+    Table,
     Text,
     UniqueConstraint,
     and_,
@@ -163,6 +166,68 @@ def chat_search_message_content_match_sql(dialect_name: str, key: str) -> str:
         """
 
     raise NotImplementedError(f'Unsupported dialect: {dialect_name}')
+
+
+# Declarative mirror of the FTS5 virtual table. No DDL is emitted; it only
+# lets us reference the table in select() calls below.
+chat_message_fts_table = Table(
+    'chat_message_fts',
+    MetaData(),
+    Column('rowid', Integer, primary_key=True),
+    Column('chat_id', String),
+    Column('user_id', String),
+    Column('body', String),
+)
+
+
+def chat_search_fts_clause(key: str, needle: str, stmt):
+    """Add the FTS match for ``needle`` to ``stmt`` and return (stmt, clause, params).
+
+    ``needle`` must be an FTS5 phrase (see chat_search_fts_escape) so the
+    trigram tokenizer performs a contiguous substring match, equivalent to
+    the legacy INSTR scan over json_extract(content, '$').
+
+    The match is a LEFT JOIN onto a derived table of matched chat ids. The
+    alternative — an ``IN`` subquery or correlated ``EXISTS`` over the FTS
+    virtual table — sends SQLite down a materialized-bloom-filter code path
+    that is ~1000x slower (measured 958 ms vs 2 ms on 961 chats).
+
+    The clause must not reference the chat.chat JSON blob: doing so would
+    defeat the chat_search_idx covering index and force a fetch of every
+    multi-megabyte chat row. Chats with no chat_message rows yet (legacy
+    imports) are covered separately, see the unsynced-id fallback in
+    get_chats_by_user_id_and_search_text.
+    """
+    derived = (
+        select(chat_message_fts_table.c.chat_id)
+        .select_from(chat_message_fts_table)
+        .where(text(f'chat_message_fts.body MATCH :{key}'))
+        .distinct()
+        .subquery()
+    )
+    stmt = stmt.outerjoin(derived, Chat.id == derived.c.chat_id)
+    clause = derived.c.chat_id.is_not(None)
+    params = {key: chat_search_fts_escape(needle)}
+    return stmt, clause, params
+
+
+def chat_search_fts_escape(needle: str) -> str:
+    """Wrap a search needle in an FTS5 quoted phrase.
+
+    A double quote inside a phrase is escaped by doubling it, so the phrase
+    matches the needle verbatim as a contiguous substring.
+    """
+    return f'"{needle.replace(chr(34), chr(34) * 2)}"'
+
+
+async def fts_chat_search_enabled(session, dialect_name: str) -> bool:
+    """FTS search is available on SQLite with the index present and the feature on."""
+    if dialect_name != 'sqlite' or not ENABLE_FTS_CHAT_SEARCH:
+        return False
+    row = await session.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chat_message_fts' LIMIT 1")
+    )
+    return row.first() is not None
 
 
 def chat_list_order(sort_by: str = 'updated_at', sort_dir: str = 'desc', user_id: str | None = None):
@@ -2063,18 +2128,22 @@ class ChatTable:
     ) -> dict[str, str | None]:
         """Build a message snippet per chat from the normalized message rows.
 
-        Keeps the search endpoint off the large embedded chat JSON.
+        Keeps the search endpoint off the large embedded chat JSON. This
+        stays on the chat_message table even when FTS is enabled: the id
+        list is tiny (one page of results), the chat_id seek is indexed,
+        and a MATCH clause OR'd with an INSTR clause over a parameterized
+        IN is rejected by FTS5 ("unable to use function MATCH in the
+        requested context").
         """
         if not chat_ids or not needles:
             return {}
 
-        clauses = []
         params = {}
+        clauses = []
         for idx, needle in enumerate(needles):
             key = f'snippet_needle_{idx}'
             clauses.append(text(chat_search_message_content_expr(dialect_name, key)))
             params[key] = needle
-
         stmt = (
             select(ChatMessage.chat_id, ChatMessage.content)
             .where(ChatMessage.chat_id.in_(chat_ids))
@@ -2176,33 +2245,83 @@ class ChatTable:
             # Check if the database dialect is either 'sqlite' or 'postgresql'
             bind = await session.connection()
             dialect_name = bind.dialect.name
+            use_fts = await fts_chat_search_enabled(session, dialect_name)
+
+            # Chats with no chat_message rows yet (failed legacy imports) are
+            # invisible to the FTS table; resolve their ids once so the main
+            # query can keep using the covering index.
+            unsynced_ids: list[str] = []
+            if use_fts:
+                unsynced_ids = (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT chat.id
+                            FROM chat
+                            WHERE chat.user_id = :user_id
+                            AND NOT EXISTS (
+                                SELECT 1
+                                FROM chat_message AS synced
+                                WHERE synced.chat_id = chat.id
+                            )
+                            """
+                        ).params(user_id=user_id)
+                    )
+                ).scalars().all()
+
+            async def content_match(key: str, needle: str, stmt):
+                """(stmt, clause, params): match message content against a needle.
+
+                Uses the FTS5 index when the needle is long enough for the
+                trigram tokenizer, otherwise falls back to the legacy scan.
+                """
+                if use_fts and len(needle) >= 3:
+                    stmt, clause, params = chat_search_fts_clause(key, needle, stmt)
+                    if unsynced_ids:
+                        fb_ids = (
+                            await session.execute(
+                                text(
+                                    """
+                                    SELECT chat.id
+                                    FROM chat
+                                    WHERE chat.id IN :fb_ids
+                                    AND (
+                                        EXISTS (
+                                            SELECT 1
+                                            FROM json_each(Chat.chat, '$.history.messages') AS history_message
+                                            WHERE LOWER(history_message.value->>'content') LIKE '%' || :fb_needle || '%'
+                                        )
+                                        OR EXISTS (
+                                            SELECT 1
+                                            FROM json_each(Chat.chat, '$.messages') AS legacy_message
+                                            WHERE LOWER(legacy_message.value->>'content') LIKE '%' || :fb_needle || '%'
+                                        )
+                                    )
+                                    """
+                                ).bindparams(bindparam('fb_ids', expanding=True), bindparam('fb_needle'))
+                                .params(fb_ids=unsynced_ids, fb_needle=needle)
+                            )
+                        ).scalars().all()
+                        if fb_ids:
+                            clause = or_(clause, Chat.id.in_(fb_ids))
+                    return stmt, clause, params
+                return stmt, text(chat_search_message_content_match_sql(dialect_name, key)), {key: needle}
 
             search_params = {}
             exact_match_clause = None
             if phrase_query:
-                exact_match_clause = or_(
-                    Chat.title.ilike(bindparam('phrase_title_key')),
-                    text(chat_search_message_content_match_sql(dialect_name, 'phrase_content_key')),
-                )
-                search_params.update(
-                    {
-                        'phrase_title_key': f'%{phrase_query}%',
-                        'phrase_content_key': phrase_query,
-                    }
-                )
+                stmt, phrase_clause, phrase_params = await content_match('phrase_content_key', phrase_query, stmt)
+                exact_match_clause = or_(Chat.title.ilike(bindparam('phrase_title_key')), phrase_clause)
+                search_params.update({'phrase_title_key': f'%{phrase_query}%', **phrase_params})
 
                 term_clauses = []
                 for term_idx, term in enumerate(search_terms):
                     title_key = f'term_title_key_{term_idx}'
                     content_key = f'term_content_key_{term_idx}'
-                    term_clauses.append(
-                        or_(
-                            Chat.title.ilike(bindparam(title_key)),
-                            text(chat_search_message_content_match_sql(dialect_name, content_key)),
-                        )
-                    )
+                    stmt, term_clause, term_params = await content_match(content_key, term, stmt)
+                    term_clauses.append(or_(Chat.title.ilike(bindparam(title_key)), term_clause))
                     search_params[title_key] = f'%{term}%'
-                    search_params[content_key] = term
+                    search_params.update(term_params)
 
                 if term_clauses:
                     stmt = stmt.filter(or_(exact_match_clause, and_(*term_clauses)))

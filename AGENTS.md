@@ -32,7 +32,12 @@ On this machine, the production instance is a user-level systemd service running
 - Data: `~/.local/share/open-webui/` (`DATA_DIR`; migrated from the former
   podman container's volume)
 - Listens on port 3002
+- Migrations run automatically at boot (`run_migrations()` in
+  `backend/open_webui/config.py`). This fork carries a fork-specific migration
+  (`a4f8c2e19b07`, the chat-search FTS index) anchored to a production
+  alembic position; after pulling upstream's new migrations the alembic
+  chain will fork into two heads and the anchor must be re-joined.
 
 ## Package manager: pnpm, not npm
 
-This fork uses pnpm while upstream uses npm. The only intentional divergence from upstream is two added files: `pnpm-lock.yaml` and `pnpm-workspace.yaml`. The lock file was automatically generated from `package-lock.json` by `pnpm`.
+This fork uses pnpm while upstream uses npm. `pnpm-lock.yaml` was generated from `package-lock.json` by `pnpm`, which is kept so upstream merges stay clean.

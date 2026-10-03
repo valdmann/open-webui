@@ -1106,6 +1106,23 @@ class ChatTable:
             if grandchild_id in messages
         ]
 
+        # If the deleted message has siblings (e.g. one of several responses
+        # to the same prompt), keep the view anchored to the adjacent
+        # sibling instead of jumping to the last one. Computed before the
+        # tree below is mutated.
+        sibling_ids = (
+            (messages.get(parent_id, {}).get('childrenIds') or [])
+            if parent_id in messages
+            else [child_id for child_id, child in messages.items() if child.get('parentId') is None]
+        )
+        target_sibling_id = None
+        if message_id in sibling_ids:
+            sibling_index = sibling_ids.index(message_id)
+            if sibling_index + 1 < len(sibling_ids):
+                target_sibling_id = sibling_ids[sibling_index + 1]
+            elif sibling_index > 0:
+                target_sibling_id = sibling_ids[sibling_index - 1]
+
         if parent_id in messages:
             messages[parent_id]['childrenIds'] = [
                 child_id for child_id in (messages[parent_id].get('childrenIds') or []) if child_id != message_id
@@ -1118,7 +1135,7 @@ class ChatTable:
         for deleted_id in deleted_ids:
             messages.pop(deleted_id, None)
 
-        current_id = parent_id
+        current_id = target_sibling_id if target_sibling_id in messages else parent_id
         child_ids = (
             [child_id for child_id, child in messages.items() if child.get('parentId') is None]
             if current_id is None

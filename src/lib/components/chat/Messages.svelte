@@ -425,6 +425,18 @@
 			(childId) => history.messages[childId]?.childrenIds ?? []
 		);
 
+		// After deleting a message that has siblings (e.g. one of several
+		// responses to the same prompt), keep the view anchored to the
+		// adjacent sibling instead of jumping to the last one.
+		const siblingIds =
+			parentMessageId && history.messages[parentMessageId]
+				? history.messages[parentMessageId].childrenIds
+				: Object.values(history.messages)
+						.filter((message) => message.parentId === null)
+						.map((message) => message.id);
+		const siblingIdx = siblingIds.indexOf(messageId);
+		const targetSiblingId = siblingIds[siblingIdx + 1] ?? siblingIds[siblingIdx - 1] ?? null;
+
 		// Update parent's children
 		if (parentMessageId && history.messages[parentMessageId]) {
 			history.messages[parentMessageId].childrenIds = [
@@ -445,7 +457,9 @@
 			delete history.messages[id];
 		});
 
-		history.currentId = getDeepestChildId(history, parentMessageId);
+		history.currentId = targetSiblingId
+			? getDeepestChildId(history, targetSiblingId)
+			: getDeepestChildId(history, parentMessageId);
 		history = history;
 
 		if (!$temporaryChatEnabled) {

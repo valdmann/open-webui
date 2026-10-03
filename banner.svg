@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="180" viewBox="0 0 800 180" role="img" aria-label="Open WebUI, personal fork by valdmann">
+  <title>Open WebUI, personal fork by valdmann</title>
+  <rect width="800" height="180" fill="#0f172a"/>
+  <g font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">
+    <path d="M 76 62 H 108 Q 120 62 120 74 V 90 Q 120 102 108 102 H 88 L 74 116 V 102 H 76 Q 64 102 64 90 V 74 Q 64 62 76 62 Z" fill="#818cf8"/>
+    <circle cx="80" cy="82" r="3.5" fill="#0f172a"/>
+    <circle cx="92" cy="82" r="3.5" fill="#0f172a"/>
+    <circle cx="104" cy="82" r="3.5" fill="#0f172a"/>
+    <text x="140" y="96" font-size="56" font-weight="600" letter-spacing="-0.5" fill="#f1f5f9">Open WebUI</text>
+    <text x="140" y="122" font-size="17" letter-spacing="0.4" fill="#94a3b8">personal fork by valdmann</text>
+    <circle cx="692" cy="84" r="4" fill="#818cf8"/>
+    <circle cx="712" cy="84" r="4" fill="#818cf8"/>
+    <circle cx="732" cy="84" r="4" fill="#818cf8"/>
+  </g>
+</svg>

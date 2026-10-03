@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Open WebUI is a self-hosted AI chat interface. This repository is my **private fork**.
+Open WebUI is a self-hosted AI chat interface. This repository is a **personal fork** of [open-webui/open-webui](https://github.com/open-webui/open-webui), hosted at [valdmann/open-webui](https://github.com/valdmann/open-webui).
 
 NOTE: This document is still work-in-progress, consequently very much incomplete.
 

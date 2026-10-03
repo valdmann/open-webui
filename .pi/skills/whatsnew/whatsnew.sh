@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # whatsnew.sh — answer "what's new upstream?" for this fork of open-webui.
 #
-# Usage: whatsnew.sh [<base> [<target>]]    (defaults: HEAD origin/main)
+# Usage: whatsnew.sh [<base> [<target>]]    (defaults: HEAD upstream/main)
 #
 # Reports on every commit reachable from <target> but not <base>, in two parts:
 #
 #   1. Release-note bullets added upstream (the CHANGELOG.md diff), marked:
 #        NEW   — cited commits are not in our history; genuinely new for us
-#        have  — already in our history (typically via an early origin/dev
+#        have  — already in our history (typically via an early upstream/dev
 #                merge); only the headline is shown
 #        NEW?  — cites nothing resolvable; shown in full but verify by hand
 #   2. Every commit in the range that no bullet cites, listed by subject
@@ -16,7 +16,7 @@
 #      subjects; uninformative subjects ("refac", "chore: format") are
 #      aggregated to a count instead of listed.
 #
-# Works identically for origin/main (the release branch) and origin/dev
+# Works identically for upstream/main (the release branch) and upstream/dev
 # (unreleased work): mid-cycle dev runs simply have no bullets yet, and the
 # not-mentioned section is the whole answer. Refs that do not resolve to a
 # commit are rejected with an error.
@@ -30,9 +30,9 @@ set -u
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
 base=${1:-HEAD}
-target=${2:-origin/main}
+target=${2:-upstream/main}
 
-git fetch origin --tags --quiet || {
+git fetch upstream --tags --quiet || {
     echo "error: git fetch failed; refusing to report from stale refs" >&2
     exit 1
 }

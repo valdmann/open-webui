@@ -11,11 +11,11 @@ Run the script next to this file:
 .pi/skills/whatsnew/whatsnew.sh [<base> [<target>]]
 ```
 
-Defaults to comparing `HEAD` with `origin/main`. Point it at `origin/dev` for
+Defaults to comparing `HEAD` with `upstream/main`. Point it at `upstream/dev` for
 unreleased work:
 
 ```sh
-.pi/skills/whatsnew/whatsnew.sh HEAD origin/dev
+.pi/skills/whatsnew/whatsnew.sh HEAD upstream/dev
 ```
 
 It git fetches, then reports on everything reachable from `<target>` but not
@@ -44,8 +44,8 @@ For replaying history (e.g. answering "what did we skip at the last merge?"):
 
 ## Why the script does what it does
 
-The `origin` remote points to the upstream repo for open-webui. `origin/main`
-is the release branch; `origin/dev` carries unreleased work that we sometimes
+The `upstream` remote points to the upstream repo (`origin` is the fork itself). `upstream/main`
+is the release branch; `upstream/dev` carries unreleased work that we sometimes
 merge early for bugfixes. This matters because it makes the naive answers wrong:
 
 - **`git log` alone is unusable.** Upstream squashes everything onto dev
@@ -68,7 +68,7 @@ merge early for bugfixes. This matters because it makes the naive answers wrong:
 The changelog is rebuilt on dev just before each release and merged to main by
 the release merge, so the same mechanism works for both branches; only the
 labels differ — beware, release tags v0.10.0 and later sit on main-side merge
-commits that never enter dev's history, so `git describe` on `origin/dev`
+commits that never enter dev's history, so `git describe` on `upstream/dev`
 claims v0.9.6 is the latest release. The script reports no release labels;
 ask `git tag` directly if you need one.
 
